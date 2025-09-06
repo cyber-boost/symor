@@ -8,7 +8,7 @@ description = "File‑mirroring utility (sym‑mirror)."
 repository = "https://github.com/cyber-boost/symor"
 keywords = ["mirror", "watch", "hardlink", "symlink"]
 categories = ["command-line-utilities"]
-exclude = ["cargo_logs", "web", "target", ".symor", "t.sh", "osxcross/"]
+exclude = ["cargo_logs", "web", "target", ".symor", "t.sh", "osxcross/", "build.sh", "buddy.jpeg", ".gitignore"]
 
 # -----------------------------------------------------------------
 #  Library name = "symor" 
@@ -58,3 +58,6 @@ strip = true
 
 # https://github.com/cyber-boost/symor.git
 # www.symor.rs (Coming soon)
+# -----------------------------------------------------------------
+#  Report Bugs = "mate@cargo.do" 
+# -----------------------------------------------------------------

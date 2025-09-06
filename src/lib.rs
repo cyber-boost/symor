@@ -162,6 +162,7 @@ impl Mirror {
     }
     fn sync_once(&self) -> Result<()> {
         if self.src.is_dir() {
+            // Handle directory sync
             for tgt in &self.targets {
                 if let Some(parent) = tgt.parent() {
                     fs::create_dir_all(parent)
@@ -188,6 +189,7 @@ impl Mirror {
                     })?;
             }
         } else {
+            // Handle file sync
             let data = fs::read(&self.src)
                 .with_context(|| format!("cannot read source file {:?}", self.src))?;
             for tgt in &self.targets {
@@ -208,6 +210,7 @@ impl Mirror {
     }
     fn sync_from_target(&self, target_path: &Path) -> Result<()> {
         if target_path.is_dir() {
+            // Handle directory sync
             if self.src.exists() {
                 if self.src.is_dir() {
                     fs::remove_dir_all(&self.src)
@@ -223,10 +226,21 @@ impl Mirror {
                         })?;
                 }
             }
+            
+            // Ensure source parent directory exists
+            if let Some(parent) = self.src.parent() {
+                fs::create_dir_all(parent)
+                    .with_context(|| {
+                        format!("cannot create source parent directory {:?}", parent)
+                    })?;
+            }
+            
             copy_dir_all(target_path, &self.src)
                 .with_context(|| {
                     format!("cannot copy directory {:?} to {:?}", target_path, self.src)
                 })?;
+            
+            // Sync to other targets
             for tgt in &self.targets {
                 if tgt != target_path {
                     if let Some(parent) = tgt.parent() {
@@ -255,13 +269,25 @@ impl Mirror {
                 }
             }
         } else {
+            // Handle file sync
             let data = fs::read(target_path)
                 .with_context(|| format!("cannot read target file {:?}", target_path))?;
+            
+            // Ensure source parent directory exists
+            if let Some(parent) = self.src.parent() {
+                fs::create_dir_all(parent)
+                    .with_context(|| {
+                        format!("cannot create source parent directory {:?}", parent)
+                    })?;
+            }
+            
             let tmp = self.src.with_extension("tmp-sync");
             fs::write(&tmp, &data)
                 .with_context(|| format!("cannot write temporary file {:?}", tmp))?;
             fs::rename(&tmp, &self.src)
                 .with_context(|| format!("cannot atomically replace {:?}", self.src))?;
+            
+            // Sync to other targets
             for tgt in &self.targets {
                 if tgt != target_path {
                     if let Some(parent) = tgt.parent() {
