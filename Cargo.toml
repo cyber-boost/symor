@@ -1,0 +1,52 @@
+[package]
+name = "symor"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+authors = ["Buddy <buddy@cyberboost.com>"]
+description = "File‑mirroring utility (sym‑mirror)."
+repository = "https://github.com/cyber-boost/symor"
+keywords = ["mirror", "watch", "hardlink", "symlink"]
+categories = ["command-line-utilities"]
+exclude = ["cargo_logs", "web", "target", ".symor", "t.sh"]
+# -----------------------------------------------------------------
+#  Library name = "symor" 
+# -----------------------------------------------------------------
+[lib]
+name = "symor"
+path = "src/lib.rs"
+
+# -----------------------------------------------------------------
+#  Binary name = "sym"
+# -----------------------------------------------------------------
+[[bin]]
+name = "sym"
+path = "src/main.rs"
+
+# -----------------------------------------------------------------
+#  Dependencies
+# -----------------------------------------------------------------
+[dependencies]
+anyhow      = "1.0"
+clap        = { version = "4.5", features = ["derive"] }
+log         = "0.4"
+env_logger  = "0.11"
+notify      = { version = "6.1", default-features = false }
+serde       = { version = "1.0", features = ["derive"] }
+serde_json  = "1.0"
+md5         = "0.7"
+flate2      = "1.0"
+glob        = "0.3"
+ratatui     = "0.24"
+crossterm   = "0.27"
+tracing     = "0.1"
+tracing-subscriber = "0.3"
+tokio       = { version = "1.0", features = ["full"] }
+rayon       = "1.8"
+num_cpus    = "1.16"
+tempfile    = "3.0"
+
+[dev-dependencies]
+tokio-test  = "0.4"
+
+# https://github.com/cyber-boost/symor.git

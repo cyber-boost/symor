@@ -1,0 +1,10 @@
+.symor
+cargo_logs/
+target/
+.DS_Store
+.idea
+.vscode
+.env
+web/
+t.sh
+Cargo.lock
