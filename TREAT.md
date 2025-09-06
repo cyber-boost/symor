@@ -1,3 +1,5 @@
+<img src="https://raw.githubusercontent.com/cyber-boost/symor/refs/heads/main/buddy.jpeg" alt="Symor" width="400">
+
 # URGENT: THE GREAT TREAT SHORTAGE
 
 **Author:** Buddy the Beagle  
@@ -135,3 +137,4 @@ Woof and best regards,
 ---
 
 **Disclaimer:** *No treats were harmed in the making of this appeal. All donations are voluntary and go directly to enhancing the operational capacity of one (1) very professional beagle. Side effects may include excessive tail wagging, improved mood, and an overwhelming sense of having done something wonderful.*
+

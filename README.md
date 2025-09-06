@@ -1,6 +1,5 @@
 # Symor
-![Symor Logo](https://github.com/cyber-boost/symor/blob/main/symor.png?raw=true)
-
+<img src="https://raw.githubusercontent.com/cyber-boost/symor/refs/heads/main/symor.png" alt="Symor" width="600">
 
 **Real-time file mirroring and version control for the modern developer**
 
