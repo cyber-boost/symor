@@ -9,3 +9,5 @@ web/
 t.sh
 Cargo.lock
 osxcross/
+build.sh
+osxcross
