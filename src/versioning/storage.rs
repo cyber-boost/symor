@@ -50,6 +50,9 @@ impl VersionStorage {
         let storage_path = self.get_storage_path(version_id);
         let compressed_data = self.compress_data(content)?;
         let temp_path = storage_path.with_extension("tmp");
+        if let Some(parent) = temp_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
         fs::write(&temp_path, &compressed_data)?;
         fs::rename(&temp_path, &storage_path)?;
         let metadata = VersionMetadata {

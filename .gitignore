@@ -8,3 +8,4 @@ target/
 web/
 t.sh
 Cargo.lock
+osxcross/

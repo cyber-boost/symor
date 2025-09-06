@@ -1,4 +1,6 @@
 # Symor
+![Symor Logo](https://github.com/cyber-boost/symor/blob/main/symor.png?raw=true)
+
 
 **Real-time file mirroring and version control for the modern developer**
 
@@ -10,7 +12,7 @@ Symor is a powerful command-line tool that provides real-time file mirroring wit
 - **📚 Version Control** - Complete file history with compressed storage and restore capabilities
 - **👀 File Watching** - Automatic change detection and versioning for monitored files
 - **📊 Performance Monitoring** - Built-in metrics, statistics, and system health monitoring
-- **🖥️ Interactive TUI** - Terminal-based user interface for advanced operations
+- **🖥️ Interactive TUI** - Terminal-based user interface for advanced operations (W.I.P.)
 - **🧹 Smart Cleanup** - Automated maintenance with configurable retention policies
 - **⚡ Thread-Safe** - Concurrent operations with proper synchronization
 - **🌍 Cross-Platform** - Works on Linux, macOS, and Windows

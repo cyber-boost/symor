@@ -28,6 +28,7 @@ FEATURES:
   • Cross-platform compatibility
 
 EXAMPLES:
+  sym source.txt dest.txt                # Mirror file changes in real-time (default)
   sym mirror source.txt dest.txt         # Mirror file changes in real-time
   sym list --detailed                    # Show all watched items with details
   sym info /path/to/file                 # Show info about a file or directory
@@ -52,32 +53,46 @@ For more information on any command, use: sym <command> --help
 )]
 struct Opt {
     #[command(subcommand)]
-    command: Commands,
+    command: Option<Commands>,
     #[arg(short, long, action = clap::ArgAction::Count)]
     verbose: u8,
+    // Default mirror arguments
+    #[arg(value_name = "SOURCE", value_hint = ValueHint::FilePath, help = "Source file to mirror")]
+    source: Option<PathBuf>,
+    #[arg(value_name = "TARGET", value_hint = ValueHint::FilePath, help = "Target file(s) to mirror to")]
+    targets: Vec<PathBuf>,
 }
 #[derive(Subcommand, Debug)]
 enum Commands {
     Mirror {
         #[arg(
             value_name = "SOURCE",
-            value_hint = ValueHint::FilePath,
-            help = "Source file to monitor for changes",
-            long_help = "The source file that will be continuously monitored. \
-                        Any changes to this file will be automatically mirrored \
-                        to all target files with atomic operations."
+            value_hint = ValueHint::AnyPath,
+            help = "Source file or directory to monitor for changes",
+            long_help = "The source file or directory that will be continuously monitored. \
+                        Any changes to this file/directory will be automatically mirrored \
+                        to all target files/directories with atomic operations."
         )]
         source: PathBuf,
         #[arg(
             value_name = "TARGET",
             num_args = 1..,
-            value_hint = ValueHint::FilePath,
-            help = "Destination file(s) to keep in sync",
-            long_help = "Target files that will be automatically updated whenever \
-                        the source file changes. Each target receives an identical \
-                        copy of the source file."
+            value_hint = ValueHint::AnyPath,
+            help = "Destination file(s) or directory(ies) to keep in sync",
+            long_help = "Target files or directories that will be automatically updated whenever \
+                        the source file/directory changes. Each target receives an identical \
+                        copy of the source file/directory."
         )]
         targets: Vec<PathBuf>,
+        #[arg(
+            short,
+            long,
+            help = "Enable bidirectional mirroring",
+            long_help = "When enabled, changes to target files will also be mirrored \
+                        back to the source file and other targets. This creates a \
+                        true bidirectional sync where any file can be the source of truth."
+        )]
+        bidirectional: bool,
     },
     List {
         #[arg(
@@ -373,68 +388,82 @@ fn main() -> Result<()> {
         )
         .init();
     match opt.command {
-        Commands::Mirror { source, targets } => {
-            handle_mirror(source, targets)?;
+        Some(Commands::Mirror { source, targets, bidirectional }) => {
+            handle_mirror(source, targets, bidirectional)?;
         }
-        Commands::List { detailed } => {
+        None => {
+            // Default behavior: if source and targets are provided, run mirror
+            if let Some(source) = opt.source {
+                if !opt.targets.is_empty() {
+                    handle_mirror(source, opt.targets, false)?;
+                } else {
+                    // Show help if no targets provided
+                    Opt::parse_from(&["sym", "--help"]);
+                }
+            } else {
+                // Show help if no arguments provided
+                Opt::parse_from(&["sym", "--help"]);
+            }
+        }
+        Some(Commands::List { detailed }) => {
             handle_list(detailed)?;
         }
-        Commands::AddTarget { source, target } => {
+        Some(Commands::AddTarget { source, target }) => {
             handle_add_target(source, target)?;
         }
-        Commands::Info { path } => {
+        Some(Commands::Info { path }) => {
             handle_info(path)?;
         }
-        Commands::Install { force } => {
+        Some(Commands::Install { force }) => {
             handle_install(force)?;
         }
-        Commands::Watch { path, recursive } => {
+        Some(Commands::Watch { path, recursive }) => {
             handle_watch(path, recursive)?;
         }
-        Commands::Restore { file_id, version_id, target } => {
+        Some(Commands::Restore { file_id, version_id, target }) => {
             handle_restore(file_id, version_id, target)?;
         }
-        Commands::Settings { action } => {
+        Some(Commands::Settings { action }) => {
             handle_settings(action)?;
         }
-        Commands::Rip { keep_data } => {
+        Some(Commands::Rip { keep_data }) => {
             handle_rip(keep_data)?;
         }
-        Commands::Stats { detailed, period } => {
+        Some(Commands::Stats { detailed, period }) => {
             handle_stats(detailed, period)?;
         }
-        Commands::Tui { refresh_rate } => {
+        Some(Commands::Tui { refresh_rate }) => {
             handle_tui(refresh_rate)?;
         }
-        Commands::Conflicts => {
+        Some(Commands::Conflicts) => {
             handle_conflicts()?;
         }
-        Commands::Check { path } => {
+        Some(Commands::Check { path }) => {
             handle_check(path)?;
         }
-        Commands::Status { path, verbose } => {
+        Some(Commands::Status { path, verbose }) => {
             handle_status(path, verbose)?;
         }
-        Commands::Unmirror { source, target } => {
+        Some(Commands::Unmirror { source, target }) => {
             handle_unmirror(source, target)?;
         }
-        Commands::History { file_id, limit } => {
+        Some(Commands::History { file_id, limit }) => {
             handle_history(file_id, limit)?;
         }
-        Commands::Clean { dry_run, file, keep } => {
+        Some(Commands::Clean { dry_run, file, keep }) => {
             handle_clean(dry_run, file, keep)?;
         }
-        Commands::Unwatch { path } => {
+        Some(Commands::Unwatch { path }) => {
             handle_unwatch(path)?;
         }
-        Commands::Sync { path, force } => {
+        Some(Commands::Sync { path, force }) => {
             handle_sync(path, force)?;
         }
     }
     Ok(())
 }
 
-fn handle_mirror(source: PathBuf, targets: Vec<PathBuf>) -> Result<()> {
+fn handle_mirror(source: PathBuf, targets: Vec<PathBuf>, bidirectional: bool) -> Result<()> {
     println!("Symor Mirror");
     println!("============");
     println!("");
@@ -445,36 +474,60 @@ fn handle_mirror(source: PathBuf, targets: Vec<PathBuf>) -> Result<()> {
     }
     println!("");
     
-    // Create source file if it doesn't exist
+    // Create source file/directory if it doesn't exist
     if !source.exists() {
-        println!("Source file does not exist, creating: {}", source.display());
-        if let Some(parent) = source.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        std::fs::write(&source, "")?;
-        println!("✓ Created empty source file");
-    }
-    
-    // Create target files if they don't exist
-    for target in &targets {
-        if !target.exists() {
-            println!("Target file does not exist, creating: {}", target.display());
-            if let Some(parent) = target.parent() {
+        if source.extension().is_none() && !source.to_string_lossy().contains('.') {
+            // Likely a directory
+            println!("Source directory does not exist, creating: {}", source.display());
+            std::fs::create_dir_all(&source)?;
+            println!("✓ Created empty source directory");
+        } else {
+            // Likely a file
+            println!("Source file does not exist, creating: {}", source.display());
+            if let Some(parent) = source.parent() {
                 std::fs::create_dir_all(parent)?;
             }
-            std::fs::write(target, "")?;
-            println!("✓ Created empty target file");
+            std::fs::write(&source, "")?;
+            println!("✓ Created empty source file");
+        }
+    }
+    
+    // Create target files/directories if they don't exist
+    for target in &targets {
+        if !target.exists() {
+            if source.is_dir() {
+                // If source is a directory, create target directory
+                println!("Target directory does not exist, creating: {}", target.display());
+                if let Some(parent) = target.parent() {
+                    std::fs::create_dir_all(parent)?;
+                }
+                std::fs::create_dir_all(target)?;
+                println!("✓ Created empty target directory");
+            } else {
+                // If source is a file, create target file
+                println!("Target file does not exist, creating: {}", target.display());
+                if let Some(parent) = target.parent() {
+                    std::fs::create_dir_all(parent)?;
+                }
+                std::fs::write(target, "")?;
+                println!("✓ Created empty target file");
+            }
         }
     }
     let mut manager = SymorManager::new()?;
     manager.load_config()?;
     manager.load_watched_items()?;
     manager.watch(source.clone(), false)?;
-    let mirror = Mirror::new(source.clone(), targets.clone())?;
+    let mirror = Mirror::new_with_bidirectional(source.clone(), targets.clone(), bidirectional)?;
     mirror.run()?;
     println!("✓ Mirror setup complete!");
     println!("  Source: {}", source.display());
     println!("  Targets: {}", targets.len());
+    if bidirectional {
+        println!("  Mode: Bidirectional (changes in any file sync to all others)");
+    } else {
+        println!("  Mode: Unidirectional (source → targets)");
+    }
     println!("");
     println!("The mirror is now active and will sync changes in real-time.");
     println!("Use 'sym list' to see all watched files.");

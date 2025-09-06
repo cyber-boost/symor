@@ -10,6 +10,23 @@ use std::{
     sync::mpsc::{self, Receiver},
     time::{Duration, Instant, SystemTime},
 };
+fn copy_dir_all(src: &Path, dst: &Path) -> Result<()> {
+    if !src.is_dir() {
+        return Err(anyhow::anyhow!("Source is not a directory: {:?}", src));
+    }
+    fs::create_dir_all(dst)?;
+    for entry in fs::read_dir(src)? {
+        let entry = entry?;
+        let src_path = entry.path();
+        let dst_path = dst.join(entry.file_name());
+        if src_path.is_dir() {
+            copy_dir_all(&src_path, &dst_path)?;
+        } else {
+            fs::copy(&src_path, &dst_path)?;
+        }
+    }
+    Ok(())
+}
 pub mod versioning;
 pub mod monitoring;
 pub mod config;
@@ -24,6 +41,7 @@ pub struct Mirror {
     targets: Vec<PathBuf>,
     rx: Receiver<NotifyResult<Event>>,
     _watcher: RecommendedWatcher,
+    bidirectional: bool,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SymorConfig {
@@ -101,33 +119,168 @@ pub fn generate_id() -> String {
 }
 impl Mirror {
     pub fn new(src: impl Into<PathBuf>, targets: Vec<PathBuf>) -> Result<Self> {
+        Self::new_with_bidirectional(src, targets, false)
+    }
+    pub fn new_with_bidirectional(
+        src: impl Into<PathBuf>,
+        targets: Vec<PathBuf>,
+        bidirectional: bool,
+    ) -> Result<Self> {
         let src = src.into();
         let (tx, rx) = mpsc::channel();
         let mut watcher = RecommendedWatcher::new(tx, Config::default())
             .context("failed to initialise file‑watcher")?;
+        let recursive_mode = if src.is_dir() {
+            RecursiveMode::Recursive
+        } else {
+            RecursiveMode::NonRecursive
+        };
         watcher
-            .watch(&src, RecursiveMode::NonRecursive)
-            .with_context(|| format!("cannot watch source file {:?}", src))?;
+            .watch(&src, recursive_mode)
+            .with_context(|| format!("cannot watch source {:?}", src))?;
+        if bidirectional {
+            for target in &targets {
+                if target.exists() {
+                    let target_recursive_mode = if target.is_dir() {
+                        RecursiveMode::Recursive
+                    } else {
+                        RecursiveMode::NonRecursive
+                    };
+                    watcher
+                        .watch(target, target_recursive_mode)
+                        .with_context(|| format!("cannot watch target {:?}", target))?;
+                }
+            }
+        }
         Ok(Self {
             src,
             targets,
             rx,
             _watcher: watcher,
+            bidirectional,
         })
     }
     fn sync_once(&self) -> Result<()> {
-        let data = fs::read(&self.src)
-            .with_context(|| format!("cannot read source file {:?}", self.src))?;
-        for tgt in &self.targets {
-            if let Some(parent) = tgt.parent() {
-                fs::create_dir_all(parent)
-                    .with_context(|| format!("cannot create directory {:?}", parent))?;
+        if self.src.is_dir() {
+            for tgt in &self.targets {
+                if let Some(parent) = tgt.parent() {
+                    fs::create_dir_all(parent)
+                        .with_context(|| {
+                            format!("cannot create directory {:?}", parent)
+                        })?;
+                }
+                if tgt.exists() {
+                    if tgt.is_dir() {
+                        fs::remove_dir_all(tgt)
+                            .with_context(|| {
+                                format!("cannot remove existing directory {:?}", tgt)
+                            })?;
+                    } else {
+                        fs::remove_file(tgt)
+                            .with_context(|| {
+                                format!("cannot remove existing file {:?}", tgt)
+                            })?;
+                    }
+                }
+                copy_dir_all(&self.src, tgt)
+                    .with_context(|| {
+                        format!("cannot copy directory {:?} to {:?}", self.src, tgt)
+                    })?;
             }
-            let tmp = tgt.with_extension("tmp-sync");
+        } else {
+            let data = fs::read(&self.src)
+                .with_context(|| format!("cannot read source file {:?}", self.src))?;
+            for tgt in &self.targets {
+                if let Some(parent) = tgt.parent() {
+                    fs::create_dir_all(parent)
+                        .with_context(|| {
+                            format!("cannot create directory {:?}", parent)
+                        })?;
+                }
+                let tmp = tgt.with_extension("tmp-sync");
+                fs::write(&tmp, &data)
+                    .with_context(|| format!("cannot write temporary file {:?}", tmp))?;
+                fs::rename(&tmp, tgt)
+                    .with_context(|| format!("cannot atomically replace {:?}", tgt))?;
+            }
+        }
+        Ok(())
+    }
+    fn sync_from_target(&self, target_path: &Path) -> Result<()> {
+        if target_path.is_dir() {
+            if self.src.exists() {
+                if self.src.is_dir() {
+                    fs::remove_dir_all(&self.src)
+                        .with_context(|| {
+                            format!(
+                                "cannot remove existing source directory {:?}", self.src
+                            )
+                        })?;
+                } else {
+                    fs::remove_file(&self.src)
+                        .with_context(|| {
+                            format!("cannot remove existing source file {:?}", self.src)
+                        })?;
+                }
+            }
+            copy_dir_all(target_path, &self.src)
+                .with_context(|| {
+                    format!("cannot copy directory {:?} to {:?}", target_path, self.src)
+                })?;
+            for tgt in &self.targets {
+                if tgt != target_path {
+                    if let Some(parent) = tgt.parent() {
+                        fs::create_dir_all(parent)
+                            .with_context(|| {
+                                format!("cannot create directory {:?}", parent)
+                            })?;
+                    }
+                    if tgt.exists() {
+                        if tgt.is_dir() {
+                            fs::remove_dir_all(tgt)
+                                .with_context(|| {
+                                    format!("cannot remove existing directory {:?}", tgt)
+                                })?;
+                        } else {
+                            fs::remove_file(tgt)
+                                .with_context(|| {
+                                    format!("cannot remove existing file {:?}", tgt)
+                                })?;
+                        }
+                    }
+                    copy_dir_all(&self.src, tgt)
+                        .with_context(|| {
+                            format!("cannot copy directory {:?} to {:?}", self.src, tgt)
+                        })?;
+                }
+            }
+        } else {
+            let data = fs::read(target_path)
+                .with_context(|| format!("cannot read target file {:?}", target_path))?;
+            let tmp = self.src.with_extension("tmp-sync");
             fs::write(&tmp, &data)
                 .with_context(|| format!("cannot write temporary file {:?}", tmp))?;
-            fs::rename(&tmp, tgt)
-                .with_context(|| format!("cannot atomically replace {:?}", tgt))?;
+            fs::rename(&tmp, &self.src)
+                .with_context(|| format!("cannot atomically replace {:?}", self.src))?;
+            for tgt in &self.targets {
+                if tgt != target_path {
+                    if let Some(parent) = tgt.parent() {
+                        fs::create_dir_all(parent)
+                            .with_context(|| {
+                                format!("cannot create directory {:?}", parent)
+                            })?;
+                    }
+                    let tmp = tgt.with_extension("tmp-sync");
+                    fs::write(&tmp, &data)
+                        .with_context(|| {
+                            format!("cannot write temporary file {:?}", tmp)
+                        })?;
+                    fs::rename(&tmp, tgt)
+                        .with_context(|| {
+                            format!("cannot atomically replace {:?}", tgt)
+                        })?;
+                }
+            }
         }
         Ok(())
     }
@@ -160,15 +313,38 @@ impl Mirror {
                 }
                 Err(mpsc::RecvTimeoutError::Timeout) => {
                     if pending {
-                        match self.sync_once() {
-                            Ok(_) => {
-                                if let Some(ev) = &last_event {
-                                    info!("synced after {:?}", ev.kind);
-                                } else {
-                                    info!("synced");
+                        if let Some(ev) = &last_event {
+                            if self.bidirectional {
+                                let changed_path = &ev.paths[0];
+                                if changed_path == &self.src {
+                                    match self.sync_once() {
+                                        Ok(_) => {
+                                            info!("synced source to targets after {:?}", ev.kind)
+                                        }
+                                        Err(e) => error!("sync failed: {e:?}"),
+                                    }
+                                } else if self.targets.contains(changed_path) {
+                                    match self.sync_from_target(changed_path) {
+                                        Ok(_) => {
+                                            info!(
+                                                "synced target to source and other targets after {:?}", ev
+                                                .kind
+                                            )
+                                        }
+                                        Err(e) => error!("bidirectional sync failed: {e:?}"),
+                                    }
+                                }
+                            } else {
+                                match self.sync_once() {
+                                    Ok(_) => info!("synced after {:?}", ev.kind),
+                                    Err(e) => error!("sync failed: {e:?}"),
                                 }
                             }
-                            Err(e) => error!("sync failed: {e:?}"),
+                        } else {
+                            match self.sync_once() {
+                                Ok(_) => info!("synced"),
+                                Err(e) => error!("sync failed: {e:?}"),
+                            }
                         }
                         pending = false;
                         last_event = None;
@@ -195,7 +371,14 @@ impl SymorManager {
         let watched_items = HashMap::new();
         Self::setup_directory_structure(&config.home_dir)?;
         let change_detector = versioning::detector::ChangeDetector::new();
-        let version_storage = versioning::storage::VersionStorage::new();
+        let storage_config = versioning::storage::StorageConfig {
+            compression_level: 6,
+            max_versions_per_file: 10,
+            storage_path: config.home_dir.join("versions"),
+        };
+        let version_storage = versioning::storage::VersionStorage::with_config(
+            storage_config,
+        );
         let restore_engine = versioning::restore::RestoreEngine::new()?;
         let manager = Self {
             config,
@@ -207,36 +390,37 @@ impl SymorManager {
         Ok(manager)
     }
     pub fn setup_directory_structure(home_dir: &Path) -> Result<()> {
+        #[cfg(unix)]
         use std::os::unix::fs::PermissionsExt;
         fs::create_dir_all(home_dir)?;
         let mut perms = fs::metadata(home_dir)?.permissions();
-        perms.set_mode(0o700);
+        #[cfg(unix)] perms.set_mode(0o700);
         fs::set_permissions(home_dir, perms)?;
         let backups_dir = home_dir.join("backups");
         fs::create_dir_all(&backups_dir)?;
         let mut backup_perms = fs::metadata(&backups_dir)?.permissions();
-        backup_perms.set_mode(0o700);
+        #[cfg(unix)] backup_perms.set_mode(0o700);
         fs::set_permissions(&backups_dir, backup_perms)?;
         let temp_dir = home_dir.join("temp");
         fs::create_dir_all(&temp_dir)?;
         let mut temp_perms = fs::metadata(&temp_dir)?.permissions();
-        temp_perms.set_mode(0o700);
+        #[cfg(unix)] temp_perms.set_mode(0o700);
         fs::set_permissions(&temp_dir, temp_perms)?;
         let logs_dir = home_dir.join("logs");
         fs::create_dir_all(&logs_dir)?;
         let mut logs_perms = fs::metadata(&logs_dir)?.permissions();
-        logs_perms.set_mode(0o700);
+        #[cfg(unix)] logs_perms.set_mode(0o700);
         fs::set_permissions(&logs_dir, logs_perms)?;
         let config_path = home_dir.join("config.json");
         if config_path.exists() {
             let mut config_perms = fs::metadata(&config_path)?.permissions();
-            config_perms.set_mode(0o600);
+            #[cfg(unix)] config_perms.set_mode(0o600);
             fs::set_permissions(&config_path, config_perms)?;
         }
         let mirror_path = home_dir.join("mirror.json");
         if mirror_path.exists() {
             let mut mirror_perms = fs::metadata(&mirror_path)?.permissions();
-            mirror_perms.set_mode(0o600);
+            #[cfg(unix)] mirror_perms.set_mode(0o600);
             fs::set_permissions(&mirror_path, mirror_perms)?;
         }
         info!(
@@ -254,12 +438,13 @@ impl SymorManager {
         Ok(())
     }
     pub fn save_config(&self) -> Result<()> {
+        #[cfg(unix)]
         use std::os::unix::fs::PermissionsExt;
         let config_path = self.config.home_dir.join("config.json");
         let config_data = serde_json::to_string_pretty(&self.config)?;
         fs::write(&config_path, config_data)?;
         let mut perms = fs::metadata(&config_path)?.permissions();
-        perms.set_mode(0o600);
+        #[cfg(unix)] perms.set_mode(0o600);
         fs::set_permissions(&config_path, perms)?;
         Ok(())
     }
@@ -332,12 +517,13 @@ impl SymorManager {
         Ok(())
     }
     fn save_watched_items(&self) -> Result<()> {
+        #[cfg(unix)]
         use std::os::unix::fs::PermissionsExt;
         let mirror_path = self.config.home_dir.join("mirror.json");
         let mirror_data = serde_json::to_string_pretty(&self.watched_items)?;
         fs::write(&mirror_path, mirror_data)?;
         let mut perms = fs::metadata(&mirror_path)?.permissions();
-        perms.set_mode(0o600);
+        #[cfg(unix)] perms.set_mode(0o600);
         fs::set_permissions(&mirror_path, perms)?;
         Ok(())
     }

@@ -1,8 +1,11 @@
 use anyhow::Result;
 use std::{
     fs, path::{Path, PathBuf},
-    time::SystemTime, os::unix::fs::PermissionsExt,
+    time::SystemTime,
 };
+
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 #[derive(Debug, Clone)]
 pub struct RestoreOptions {
     pub preserve_permissions: bool,
@@ -58,7 +61,10 @@ impl RestoreEngine {
             options.preserve_permissions,
         ) {
             if let Ok(mut perms) = fs::metadata(target_path).map(|m| m.permissions()) {
-                perms.set_mode(metadata.permissions().mode());
+                #[cfg(unix)]
+                {
+                    perms.set_mode(metadata.permissions().mode());
+                }
                 let _ = fs::set_permissions(target_path, perms);
             }
         }

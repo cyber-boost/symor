@@ -8,7 +8,8 @@ description = "File‑mirroring utility (sym‑mirror)."
 repository = "https://github.com/cyber-boost/symor"
 keywords = ["mirror", "watch", "hardlink", "symlink"]
 categories = ["command-line-utilities"]
-exclude = ["cargo_logs", "web", "target", ".symor", "t.sh"]
+exclude = ["cargo_logs", "web", "target", ".symor", "t.sh", "osxcross/"]
+
 # -----------------------------------------------------------------
 #  Library name = "symor" 
 # -----------------------------------------------------------------
@@ -31,7 +32,7 @@ anyhow      = "1.0"
 clap        = { version = "4.5", features = ["derive"] }
 log         = "0.4"
 env_logger  = "0.11"
-notify      = { version = "6.1", default-features = false }
+notify      = { version = "8.2", default-features = false, features = ["macos_fsevent"] }
 serde       = { version = "1.0", features = ["derive"] }
 serde_json  = "1.0"
 md5         = "0.7"
@@ -49,4 +50,11 @@ tempfile    = "3.0"
 [dev-dependencies]
 tokio-test  = "0.4"
 
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+
 # https://github.com/cyber-boost/symor.git
+# www.symor.rs (Coming soon)
