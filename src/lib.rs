@@ -14,15 +14,24 @@ fn copy_dir_all(src: &Path, dst: &Path) -> Result<()> {
     if !src.is_dir() {
         return Err(anyhow::anyhow!("Source is not a directory: {:?}", src));
     }
-    fs::create_dir_all(dst)?;
-    for entry in fs::read_dir(src)? {
-        let entry = entry?;
+    
+    // Ensure destination directory exists
+    fs::create_dir_all(dst)
+        .with_context(|| format!("cannot create destination directory {:?}", dst))?;
+    
+    for entry in fs::read_dir(src)
+        .with_context(|| format!("cannot read source directory {:?}", src))? {
+        let entry = entry
+            .with_context(|| format!("cannot read directory entry in {:?}", src))?;
         let src_path = entry.path();
         let dst_path = dst.join(entry.file_name());
+        
         if src_path.is_dir() {
-            copy_dir_all(&src_path, &dst_path)?;
+            copy_dir_all(&src_path, &dst_path)
+                .with_context(|| format!("cannot copy subdirectory {:?} to {:?}", src_path, dst_path))?;
         } else {
-            fs::copy(&src_path, &dst_path)?;
+            fs::copy(&src_path, &dst_path)
+                .with_context(|| format!("cannot copy file {:?} to {:?}", src_path, dst_path))?;
         }
     }
     Ok(())
@@ -149,6 +158,9 @@ impl Mirror {
                     watcher
                         .watch(target, target_recursive_mode)
                         .with_context(|| format!("cannot watch target {:?}", target))?;
+                    println!("Target watcher created successfully");
+                } else {
+                    println!("Target does not exist, skipping bidirectional watch: {:?}", target);
                 }
             }
         }
@@ -170,8 +182,12 @@ impl Mirror {
                             format!("cannot create directory {:?}", parent)
                         })?;
                 }
+
+                // Remove existing target if it exists
                 if tgt.exists() {
-                    if tgt.is_dir() {
+                    let metadata = fs::metadata(tgt)
+                        .with_context(|| format!("cannot get metadata for {:?}", tgt))?;
+                    if metadata.is_dir() {
                         fs::remove_dir_all(tgt)
                             .with_context(|| {
                                 format!("cannot remove existing directory {:?}", tgt)
@@ -183,10 +199,29 @@ impl Mirror {
                             })?;
                     }
                 }
-                copy_dir_all(&self.src, tgt)
-                    .with_context(|| {
-                        format!("cannot copy directory {:?} to {:?}", self.src, tgt)
-                    })?;
+                
+                // Copy directory contents to target
+                // First ensure target directory exists
+                fs::create_dir_all(tgt)
+                    .with_context(|| format!("cannot create target directory {:?}", tgt))?;
+
+                // Copy each item from source to target
+                for entry in fs::read_dir(&self.src)
+                    .with_context(|| format!("cannot read source directory {:?}", self.src))? {
+                    let entry = entry
+                        .with_context(|| format!("cannot read directory entry in {:?}", self.src))?;
+                    let src_path = entry.path();
+                    let file_name = entry.file_name();
+                    let dst_path = tgt.join(file_name);
+
+                    if src_path.is_dir() {
+                        copy_dir_all(&src_path, &dst_path)
+                            .with_context(|| format!("cannot copy subdirectory {:?} to {:?}", src_path, dst_path))?;
+                    } else {
+                        fs::copy(&src_path, &dst_path)
+                            .with_context(|| format!("cannot copy file {:?} to {:?}", src_path, dst_path))?;
+                    }
+                }
             }
         } else {
             // Handle file sync
@@ -199,6 +234,25 @@ impl Mirror {
                             format!("cannot create directory {:?}", parent)
                         })?;
                 }
+                
+                // Remove existing target if it exists
+                if tgt.exists() {
+                    let metadata = fs::metadata(tgt)
+                        .with_context(|| format!("cannot get metadata for {:?}", tgt))?;
+                    if metadata.is_dir() {
+                        fs::remove_dir_all(tgt)
+                            .with_context(|| {
+                                format!("cannot remove existing directory {:?}", tgt)
+                            })?;
+                    } else {
+                        fs::remove_file(tgt)
+                            .with_context(|| {
+                                format!("cannot remove existing file {:?}", tgt)
+                            })?;
+                    }
+                }
+                
+                // Write file atomically
                 let tmp = tgt.with_extension("tmp-sync");
                 fs::write(&tmp, &data)
                     .with_context(|| format!("cannot write temporary file {:?}", tmp))?;
@@ -235,10 +289,28 @@ impl Mirror {
                     })?;
             }
             
-            copy_dir_all(target_path, &self.src)
-                .with_context(|| {
-                    format!("cannot copy directory {:?} to {:?}", target_path, self.src)
-                })?;
+            // Copy directory contents to source
+            // First ensure source directory exists
+            fs::create_dir_all(&self.src)
+                .with_context(|| format!("cannot create source directory {:?}", self.src))?;
+
+            // Copy each item from target to source
+            for entry in fs::read_dir(target_path)
+                .with_context(|| format!("cannot read target directory {:?}", target_path))? {
+                let entry = entry
+                    .with_context(|| format!("cannot read directory entry in {:?}", target_path))?;
+                let src_path = entry.path();
+                let file_name = entry.file_name();
+                let dst_path = self.src.join(file_name);
+
+                if src_path.is_dir() {
+                    copy_dir_all(&src_path, &dst_path)
+                        .with_context(|| format!("cannot copy subdirectory {:?} to {:?}", src_path, dst_path))?;
+                } else {
+                    fs::copy(&src_path, &dst_path)
+                        .with_context(|| format!("cannot copy file {:?} to {:?}", src_path, dst_path))?;
+                }
+            }
             
             // Sync to other targets
             for tgt in &self.targets {
@@ -262,10 +334,28 @@ impl Mirror {
                                 })?;
                         }
                     }
-                    copy_dir_all(&self.src, tgt)
-                        .with_context(|| {
-                            format!("cannot copy directory {:?} to {:?}", self.src, tgt)
-                        })?;
+                    // Copy directory contents to target
+                    // First ensure target directory exists
+                    fs::create_dir_all(tgt)
+                        .with_context(|| format!("cannot create target directory {:?}", tgt))?;
+
+                    // Copy each item from source to target
+                    for entry in fs::read_dir(&self.src)
+                        .with_context(|| format!("cannot read source directory {:?}", self.src))? {
+                        let entry = entry
+                            .with_context(|| format!("cannot read directory entry in {:?}", self.src))?;
+                        let src_path = entry.path();
+                        let file_name = entry.file_name();
+                        let dst_path = tgt.join(file_name);
+
+                        if src_path.is_dir() {
+                            copy_dir_all(&src_path, &dst_path)
+                                .with_context(|| format!("cannot copy subdirectory {:?} to {:?}", src_path, dst_path))?;
+                        } else {
+                            fs::copy(&src_path, &dst_path)
+                                .with_context(|| format!("cannot copy file {:?} to {:?}", src_path, dst_path))?;
+                        }
+                    }
                 }
             }
         } else {
@@ -504,27 +594,250 @@ impl SymorManager {
             println!("No files or directories are currently being watched.");
             return Ok(());
         }
-        println!("Watched items:");
-        println!("==============");
+
+        println!("📋 Watched Items Summary");
+        println!("========================");
+        println!("Total watched roots: {}", self.watched_items.len());
+        println!();
+
+        let mut total_files = 0;
+        let mut total_dirs = 0;
+        let mut all_files = Vec::new();
+
+        // Collect all files from watched items
         for (id, item) in &self.watched_items {
-            println!("ID: {}", id);
-            println!("Path: {:?}", item.path);
-            println!("Type: {}", if item.is_directory { "Directory" } else { "File" });
-            println!("Recursive: {}", item.recursive);
-            if detailed {
-                println!("Created: {:?}", item.created_at);
-                println!("Last Modified: {:?}", item.last_modified);
-                println!("Versions: {}", item.versions.len());
-                if !item.versions.is_empty() {
-                    println!(
-                        "Latest version: {:?}", item.versions.last().unwrap().timestamp
-                    );
+            if item.is_directory && item.recursive {
+                // Recursively collect all files in this directory
+                let files_in_dir = self.collect_files_recursive(&item.path)?;
+                total_files += files_in_dir.len();
+                total_dirs += 1;
+
+                println!("📁 Directory: {:?}", item.path);
+                println!("   ID: {}", id);
+                println!("   Files within: {}", files_in_dir.len());
+
+                if detailed {
+                    println!("   Created: {:?}", item.created_at);
+                    println!("   Last Modified: {:?}", item.last_modified);
+                    println!("   Versions: {}", item.versions.len());
                 }
+
+                for file_path in &files_in_dir {
+                    println!("   📄 {}", file_path.display());
+                    all_files.push(file_path.clone());
+                }
+                println!();
+            } else if item.is_directory {
+                total_dirs += 1;
+                println!("📁 Directory (non-recursive): {:?}", item.path);
+                println!("   ID: {}", id);
+                if detailed {
+                    println!("   Created: {:?}", item.created_at);
+                    println!("   Versions: {}", item.versions.len());
+                }
+                println!();
+            } else {
+                total_files += 1;
+                println!("📄 File: {:?}", item.path);
+                println!("   ID: {}", id);
+                if detailed {
+                    println!("   Created: {:?}", item.created_at);
+                    println!("   Last Modified: {:?}", item.last_modified);
+                    println!("   Size: {} bytes", item.path.metadata().ok().map(|m| m.len()).unwrap_or(0));
+                    println!("   Versions: {}", item.versions.len());
+                }
+                all_files.push(item.path.clone());
+                println!();
             }
-            println!();
         }
+
+        println!("📊 Summary:");
+        println!("  Directories: {}", total_dirs);
+        println!("  Files: {}", total_files);
+        println!("  Total items: {}", total_files + total_dirs);
+
+        // Save to individual JSON group files
+        self.save_file_groups(&all_files)?;
+
         Ok(())
     }
+
+    fn collect_files_recursive(&self, dir_path: &Path) -> Result<Vec<PathBuf>> {
+        let mut files = Vec::new();
+
+        fn collect_recursive(path: &Path, files: &mut Vec<PathBuf>) -> Result<()> {
+            if path.is_dir() {
+                for entry in fs::read_dir(path)? {
+                    let entry = entry?;
+                    let entry_path = entry.path();
+                    if entry_path.is_file() {
+                        files.push(entry_path);
+                    } else if entry_path.is_dir() {
+                        collect_recursive(&entry_path, files)?;
+                    }
+                }
+            }
+            Ok(())
+        }
+
+        collect_recursive(dir_path, &mut files)?;
+        Ok(files)
+    }
+
+    fn save_file_groups(&self, files: &[PathBuf]) -> Result<()> {
+        use serde_json::json;
+
+        let groups_dir = self.config.home_dir.join("groups");
+        fs::create_dir_all(&groups_dir)?;
+
+        // Group files by their parent directory, excluding temporary paths
+        let mut groups: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
+
+        for file in files {
+            if let Some(parent) = file.parent() {
+                let group_name = parent.to_string_lossy().to_string();
+
+                // Skip temporary directories that are likely to be cleaned up
+                if group_name.starts_with("/tmp/") ||
+                   group_name.starts_with("/var/tmp/") ||
+                   group_name.contains("/.tmp") ||
+                   group_name.contains("/tmp.") {
+                    println!("⚠️  Skipping temporary path: {}", group_name);
+                    continue;
+                }
+
+                let file_name = file.file_name().unwrap_or_default().to_string_lossy().to_string();
+                groups.entry(group_name).or_insert_with(Vec::new).push(file_name);
+            }
+        }
+
+        // Create individual subdirectories for each group
+        let mut total_groups_created = 0;
+        let mut all_group_paths = Vec::new();
+
+        for (group_path, group_files) in &groups {
+            // Generate a unique group ID based on the path
+            let group_id = format!("{:x}", md5::compute(group_path.as_bytes()));
+
+            // Create group subdirectory
+            let group_subdir = groups_dir.join(&group_id);
+            fs::create_dir_all(&group_subdir)?;
+
+            // Get just the folder name for the filename
+            let folder_name = PathBuf::from(group_path)
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string();
+
+            let group_data = json!({
+                "group_id": group_id,
+                "group_path": group_path,
+                "folder_name": folder_name,
+                "timestamp": std::time::SystemTime::now(),
+                "file_count": group_files.len(),
+                "files": group_files
+            });
+
+            let group_file = group_subdir.join(format!("{}.json", folder_name));
+            let json_string = serde_json::to_string_pretty(&group_data)?;
+            fs::write(&group_file, json_string)?;
+
+            // Create group-specific index
+            let group_index_data = json!({
+                "group_id": group_id,
+                "group_path": group_path,
+                "folder_name": folder_name,
+                "timestamp": std::time::SystemTime::now(),
+                "file_count": group_files.len(),
+                "files": group_files
+            });
+
+            let group_index_file = group_subdir.join("index.json");
+            let group_index_json = serde_json::to_string_pretty(&group_index_data)?;
+            fs::write(&group_index_file, group_index_json)?;
+
+            println!("💾 Group '{}' saved to: ~/.symor/groups/{}/", folder_name, group_id);
+            println!("   📄 {}.json", folder_name);
+            println!("   📄 index.json");
+
+            all_group_paths.push(json!({
+                "group_id": group_id,
+                "folder_name": folder_name,
+                "path": group_path,
+                "file_count": group_files.len()
+            }));
+
+            total_groups_created += 1;
+        }
+
+        // Create master index file
+        let master_index_data = json!({
+            "timestamp": std::time::SystemTime::now(),
+            "total_files": files.len(),
+            "total_groups": total_groups_created,
+            "groups": all_group_paths
+        });
+
+        let master_index_file = groups_dir.join("index.json");
+        let master_index_json = serde_json::to_string_pretty(&master_index_data)?;
+        fs::write(master_index_file, master_index_json)?;
+
+        println!("📋 Master index saved to: ~/.symor/groups/index.json");
+        println!("📁 Created {} group directories with individual management", total_groups_created);
+
+        // Clean up any stale groups that no longer exist
+        self.cleanup_stale_groups()?;
+
+        Ok(())
+    }
+
+    fn cleanup_stale_groups(&self) -> Result<()> {
+        let groups_dir = self.config.home_dir.join("groups");
+
+        if !groups_dir.exists() {
+            return Ok(());
+        }
+
+        let mut cleaned_count = 0;
+
+        // Read all group directories
+        for entry in fs::read_dir(&groups_dir)? {
+            let entry = entry?;
+            let group_subdir = entry.path();
+
+            // Skip the master index.json file
+            if group_subdir.is_file() {
+                continue;
+            }
+
+            // Check if this is a group directory (should contain index.json)
+            let group_index_file = group_subdir.join("index.json");
+            if !group_index_file.exists() {
+                continue;
+            }
+
+            // Read the group index to get the path
+            let index_content = fs::read_to_string(&group_index_file)?;
+            if let Ok(index_data) = serde_json::from_str::<serde_json::Value>(&index_content) {
+                if let Some(group_path) = index_data.get("group_path").and_then(|p| p.as_str()) {
+                    // Check if the original directory still exists
+                    if !PathBuf::from(group_path).exists() {
+                        println!("🗑️  Removing stale group: {} (path no longer exists)", group_path);
+                        fs::remove_dir_all(&group_subdir)?;
+                        cleaned_count += 1;
+                    }
+                }
+            }
+        }
+
+        if cleaned_count > 0 {
+            println!("🧹 Cleaned up {} stale group directories", cleaned_count);
+        }
+
+        Ok(())
+    }
+
     pub fn get_info(&self, path: &Path) -> Result<()> {
         let metadata = fs::metadata(path)?;
         println!("Path: {:?}", path);
@@ -659,6 +972,14 @@ impl SymorManager {
         if !item.path.exists() {
             return Err(anyhow::anyhow!("File does not exist: {:?}", item.path));
         }
+
+        // Skip backup creation for directories - we only backup file contents, not directory structures
+        // (Directory existence is tracked by the change detector, but not versioned as files)
+        if item.path.is_dir() {
+            println!("📁 Directory tracked (not versioned): {:?}", item.path);
+            return Ok(());
+        }
+
         let content = fs::read(&item.path)?;
         let size = content.len() as u64;
         let hash = format!("{:x}", md5::compute(& content));
