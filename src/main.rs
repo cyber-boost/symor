@@ -56,10 +56,17 @@ struct Opt {
     command: Option<Commands>,
     #[arg(short, long, action = clap::ArgAction::Count)]
     verbose: u8,
-    // Default mirror arguments
-    #[arg(value_name = "SOURCE", value_hint = ValueHint::FilePath, help = "Source file to mirror")]
+    #[arg(
+        value_name = "SOURCE",
+        value_hint = ValueHint::FilePath,
+        help = "Source file to mirror"
+    )]
     source: Option<PathBuf>,
-    #[arg(value_name = "TARGET", value_hint = ValueHint::FilePath, help = "Target file(s) to mirror to")]
+    #[arg(
+        value_name = "TARGET",
+        value_hint = ValueHint::FilePath,
+        help = "Target file(s) to mirror to"
+    )]
     targets: Vec<PathBuf>,
 }
 #[derive(Subcommand, Debug)]
@@ -392,16 +399,13 @@ fn main() -> Result<()> {
             handle_mirror(source, targets, bidirectional)?;
         }
         None => {
-            // Default behavior: if source and targets are provided, run mirror
             if let Some(source) = opt.source {
                 if !opt.targets.is_empty() {
                     handle_mirror(source, opt.targets, false)?;
                 } else {
-                    // Show help if no targets provided
                     Opt::parse_from(&["sym", "--help"]);
                 }
             } else {
-                // Show help if no arguments provided
                 Opt::parse_from(&["sym", "--help"]);
             }
         }
@@ -462,8 +466,11 @@ fn main() -> Result<()> {
     }
     Ok(())
 }
-
-fn handle_mirror(source: PathBuf, targets: Vec<PathBuf>, bidirectional: bool) -> Result<()> {
+fn handle_mirror(
+    source: PathBuf,
+    targets: Vec<PathBuf>,
+    bidirectional: bool,
+) -> Result<()> {
     println!("Symor Mirror");
     println!("============");
     println!("");
@@ -473,16 +480,12 @@ fn handle_mirror(source: PathBuf, targets: Vec<PathBuf>, bidirectional: bool) ->
         println!("  - {}", target.display());
     }
     println!("");
-    
-    // Create source file/directory if it doesn't exist
     if !source.exists() {
         if source.extension().is_none() && !source.to_string_lossy().contains('.') {
-            // Likely a directory
             println!("Source directory does not exist, creating: {}", source.display());
             std::fs::create_dir_all(&source)?;
             println!("✓ Created empty source directory");
         } else {
-            // Likely a file
             println!("Source file does not exist, creating: {}", source.display());
             if let Some(parent) = source.parent() {
                 std::fs::create_dir_all(parent)?;
@@ -491,20 +494,18 @@ fn handle_mirror(source: PathBuf, targets: Vec<PathBuf>, bidirectional: bool) ->
             println!("✓ Created empty source file");
         }
     }
-    
-    // Create target files/directories if they don't exist
     for target in &targets {
         if !target.exists() {
             if source.is_dir() {
-                // If source is a directory, create target directory
-                println!("Target directory does not exist, creating: {}", target.display());
+                println!(
+                    "Target directory does not exist, creating: {}", target.display()
+                );
                 if let Some(parent) = target.parent() {
                     std::fs::create_dir_all(parent)?;
                 }
                 std::fs::create_dir_all(target)?;
                 println!("✓ Created empty target directory");
             } else {
-                // If source is a file, create target file
                 println!("Target file does not exist, creating: {}", target.display());
                 if let Some(parent) = target.parent() {
                     std::fs::create_dir_all(parent)?;
@@ -518,7 +519,11 @@ fn handle_mirror(source: PathBuf, targets: Vec<PathBuf>, bidirectional: bool) ->
     manager.load_config()?;
     manager.load_watched_items()?;
     manager.watch(source.clone(), false)?;
-    let mirror = Mirror::new_with_bidirectional(source.clone(), targets.clone(), bidirectional)?;
+    let mirror = Mirror::new_with_bidirectional(
+        source.clone(),
+        targets.clone(),
+        bidirectional,
+    )?;
     mirror.run()?;
     println!("✓ Mirror setup complete!");
     println!("  Source: {}", source.display());
@@ -532,10 +537,8 @@ fn handle_mirror(source: PathBuf, targets: Vec<PathBuf>, bidirectional: bool) ->
     println!("The mirror is now active and will sync changes in real-time.");
     println!("Use 'sym list' to see all watched files.");
     println!("Use 'sym status' to check mirror status.");
-
     Ok(())
 }
-
 fn handle_list(detailed: bool) -> Result<()> {
     let mut manager = symor::SymorManager::new()?;
     manager.load_config()?;
@@ -589,35 +592,35 @@ fn handle_settings(action: SettingsCommand) -> Result<()> {
         SettingsCommand::Versioning { enabled, max_versions, compression } => {
             manager
                 .update_config(|config| {
-                if let Some(e) = enabled {
-                    config.versioning.enabled = e;
-                }
-                if let Some(mv) = max_versions {
-                    config.versioning.max_versions = mv;
-                }
-                if let Some(c) = compression {
-                    config.versioning.compression = c;
-                }
-            })?;
+                    if let Some(e) = enabled {
+                        config.versioning.enabled = e;
+                    }
+                    if let Some(mv) = max_versions {
+                        config.versioning.max_versions = mv;
+                    }
+                    if let Some(c) = compression {
+                        config.versioning.compression = c;
+                    }
+                })?;
             println!("Versioning settings updated");
         }
         SettingsCommand::Linking { link_type, preserve_permissions } => {
             manager
                 .update_config(|config| {
-                if let Some(lt) = link_type {
-                    config.linking.link_type = lt;
-                }
-                if let Some(pp) = preserve_permissions {
-                    config.linking.preserve_permissions = pp;
-                }
-            })?;
+                    if let Some(lt) = link_type {
+                        config.linking.link_type = lt;
+                    }
+                    if let Some(pp) = preserve_permissions {
+                        config.linking.preserve_permissions = pp;
+                    }
+                })?;
             println!("Linking settings updated");
         }
         SettingsCommand::Home { path } => {
             manager
                 .update_config(|config| {
-                config.home_dir = path;
-            })?;
+                    config.home_dir = path;
+                })?;
             println!("Home directory updated");
         }
         SettingsCommand::Init => {

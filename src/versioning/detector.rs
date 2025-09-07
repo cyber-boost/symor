@@ -64,41 +64,39 @@ impl ChangeDetector {
         if !self.should_process_file(path) {
             return Ok(None);
         }
-
-        // Handle directories - track existence without trying to hash
         if path.is_dir() {
             let exists = path.exists();
             let was_tracked = self.last_hashes.contains_key(path);
-
             match (was_tracked, exists) {
                 (false, true) => {
-                    // Directory was created
                     self.last_hashes.insert(path.to_path_buf(), "directory".to_string());
-                    return Ok(Some(FileChangeEvent {
-                        path: path.to_path_buf(),
-                        change_type: ChangeType::Created,
-                        timestamp: SystemTime::now(),
-                        old_hash: None,
-                        new_hash: "directory".to_string(),
-                        size: None,
-                    }));
+                    return Ok(
+                        Some(FileChangeEvent {
+                            path: path.to_path_buf(),
+                            change_type: ChangeType::Created,
+                            timestamp: SystemTime::now(),
+                            old_hash: None,
+                            new_hash: "directory".to_string(),
+                            size: None,
+                        }),
+                    );
                 }
                 (true, false) => {
-                    // Directory was deleted
                     self.last_hashes.remove(path);
-                    return Ok(Some(FileChangeEvent {
-                        path: path.to_path_buf(),
-                        change_type: ChangeType::Deleted,
-                        timestamp: SystemTime::now(),
-                        old_hash: Some("directory".to_string()),
-                        new_hash: "".to_string(),
-                        size: None,
-                    }));
+                    return Ok(
+                        Some(FileChangeEvent {
+                            path: path.to_path_buf(),
+                            change_type: ChangeType::Deleted,
+                            timestamp: SystemTime::now(),
+                            old_hash: Some("directory".to_string()),
+                            new_hash: "".to_string(),
+                            size: None,
+                        }),
+                    );
                 }
-                _ => return Ok(None), // No change
+                _ => return Ok(None),
             }
         }
-
         let current_hash = self.calculate_file_hash(path)?;
         let previous_hash = self.last_hashes.get(path);
         let change_event = match (previous_hash, path.exists()) {
